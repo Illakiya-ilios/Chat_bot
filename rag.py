@@ -5,11 +5,18 @@ from dotenv import load_dotenv
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import Chroma
+from langchain_community.retrievers import BM25Retriever
+
 from langchain_aws.embeddings import BedrockEmbeddings
 from langchain_aws import ChatBedrock
+
 from langchain_core.prompts import PromptTemplate
 from langchain.tools import tool
 from langchain_core.runnables import RunnableSequence, RunnablePassthrough
+
+from langchain_core.documents import Document
+from langchain_core.retrievers import BaseRetriever
+from typing import List
 
 
 # =========================
@@ -53,14 +60,74 @@ else:
     print("Vector DB created & saved.")
 
 
+# ==========================================================
+#           HYBRID SEARCH (BM25 + VECTOR SEMANTIC)
+# ==========================================================
+
+class HybridRetriever(BaseRetriever):
+    """
+    Combines BM25 (lexical) and Vector (semantic) search with deduplication.
+    """
+
+    bm25_retriever: BaseRetriever
+    vector_retriever: BaseRetriever
+    k: int = 5
+
+    def _get_relevant_documents(self, query: str) -> List[Document]:
+
+        bm25_docs = self.bm25_retriever.invoke(query)
+        vector_docs = self.vector_retriever.invoke(query)
+        
+        combined = bm25_docs + vector_docs
+
+        seen = set()
+        unique_docs = []
+
+        for doc in combined:
+            key = (doc.metadata.get("source", ""), doc.metadata.get("page", 0))
+            if key not in seen:
+                seen.add(key)
+                unique_docs.append(doc)
+                if len(unique_docs) >= self.k:
+                    break
+
+        return unique_docs[:self.k]
+
+
+def setup_hybrid_retriever():
+    print("\nSetting up BM25 retriever...")
+    all_docs = db.get(include=["documents", "metadatas"])  # load all docs
+    documents = [
+        Document(page_content=d, metadata=m)
+        for d, m in zip(all_docs["documents"], all_docs["metadatas"])
+    ]
+
+    bm25 = BM25Retriever.from_documents(documents)
+    bm25.k = 10
+
+    print("Setting up Vector retriever...")
+    vector_retriever = db.as_retriever(search_kwargs={"k": 10})
+
+    print("Creating Hybrid retriever...")
+    return HybridRetriever(
+        bm25_retriever=bm25,
+        vector_retriever=vector_retriever,
+        k=5
+    )
+
+
+hybrid_retriever = setup_hybrid_retriever()
+
+
 # =========================
 #         TOOL
 # =========================
 
 @tool
 def search_pdf(query: str):
-    """Searches the stored document and returns best matching text."""
-    results = db.max_marginal_relevance_search(query=query, k=3, fetch_k=20, lambda_mult=0.5)
+    """Searches the stored document and returns best matching text using hybrid search."""
+    
+    results = hybrid_retriever.invoke(query)
 
     output = "\n--- Retrieved Context ---\n"
     for r in results:
@@ -95,11 +162,10 @@ Answer:
 """
 )
 
-#  RAG PIPELINE
 chain = RunnableSequence(
     {
         "question": RunnablePassthrough(),
-        "context": search_pdf  # Using TOOL inside chain
+        "context": search_pdf
     }
     | prompt
     | llm
@@ -111,9 +177,7 @@ chain = RunnableSequence(
 # =========================
 
 def ask_chatbot(question: str):
-    """Use this tool for all government scheme information, including scheme details,
-    eligibility, benefits, required documents, and general questions.
-    Do NOT use this tool for student laptop allocation or delivery status."""
+    """Use this tool for all government scheme information."""
     response = chain.invoke(question)
     return response.content if hasattr(response, "content") else response
 
