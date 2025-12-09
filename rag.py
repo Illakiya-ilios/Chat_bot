@@ -149,7 +149,7 @@ llm = ChatBedrock(
 prompt = PromptTemplate(
     input_variables=["question", "context"],
     template="""
-Answer like you are the first person in this conversation. You are a government policy information advisor. Your task is to explain details from the given info in a professional but simple manner, as if assisting a citizen.
+Answer like you are the first person in this conversation. You are a government policy advisor. Your task is to explain details, in a professional but simple manner, as if assisting a citizen.
 Always base your answers strictly on the provided context.
 Do not include information from outside the PDF.
 
