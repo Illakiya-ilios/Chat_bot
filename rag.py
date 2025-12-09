@@ -4,7 +4,7 @@ from dotenv import load_dotenv
 
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_community.vectorstores import Chroma
+from langchain_chroma import Chroma
 from langchain_community.retrievers import BM25Retriever
 
 from langchain_aws.embeddings import BedrockEmbeddings
@@ -52,7 +52,7 @@ else:
     loader = PyPDFLoader(PDF_NAME)
     docs = loader.load()
 
-    splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
+    splitter = RecursiveCharacterTextSplitter(chunk_size=600, chunk_overlap=100)
     documents = splitter.split_documents(docs)
 
     db = Chroma.from_documents(documents, embedding=embeddings, persist_directory=PERSIST_DIR)
@@ -71,7 +71,7 @@ class HybridRetriever(BaseRetriever):
 
     bm25_retriever: BaseRetriever
     vector_retriever: BaseRetriever
-    k: int = 5
+    k: int = 10
 
     def _get_relevant_documents(self, query: str) -> List[Document]:
 
@@ -106,13 +106,13 @@ def setup_hybrid_retriever():
     bm25.k = 10
 
     print("Setting up Vector retriever...")
-    vector_retriever = db.as_retriever(search_kwargs={"k": 10})
+    vector_retriever = db.as_retriever(search_type="mmr", search_kwargs={"k": 10})
 
     print("Creating Hybrid retriever...")
     return HybridRetriever(
         bm25_retriever=bm25,
         vector_retriever=vector_retriever,
-        k=5
+        k=10
     )
 
 
@@ -141,26 +141,34 @@ def search_pdf(query: str):
 # =========================
 
 llm = ChatBedrock(
-    model="anthropic.claude-3-sonnet-20240229-v1:0",
+    model="meta.llama3-70b-instruct-v1:0",
+    temperature=0,
     client=session
 )
 
 prompt = PromptTemplate(
     input_variables=["question", "context"],
     template="""
-You are an efficient assistant answering questions.
+Answer like you are the first person in this conversation. You are a government policy information advisor. Your task is to explain details from the given info in a professional but simple manner, as if assisting a citizen.
+Always base your answers strictly on the provided context.
+Do not include information from outside the PDF.
 
-Use the provided context to respond clearly and concisely in **3 sentences max**.
-If the answer is unknown, respond: "I could not find this in the document."
+When responding:
+1)Be polite, helpful, and factual
+2)Summarize only what is relevant
+3)If context lacks details, say: “I don’t have that information available right now..”
+4)Read the full context before answering.
+5)Keep answers concise (2–4 sentences)
+6)Quote specific details when available.
+Format:
+
+Context: {context}
 
 Question: {question}
 
-Context:
-{context}
-
-Answer:
 """
 )
+
 
 chain = RunnableSequence(
     {
@@ -189,7 +197,7 @@ def ask_chatbot(question: str):
 if __name__ == "__main__":
     print("\n RAG PDF Chatbot Ready!")
     while True:
-        query = input("\nAsk something about the document (or type 'exit'): ")
+        query = input("\nAsk something (or type 'exit'): ")
         if query.lower() == "exit":
             break
 

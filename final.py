@@ -131,23 +131,24 @@ generate_query = sql_prompt | llm | StrOutputParser()
 # Answer Generation Prompt
 # ========================
 answer_prompt = PromptTemplate.from_template(
-"""You are a helpful assistant.
+"""You are a student services support assistant. Your job is to read the SQL result that has already been fetched and convert it into a clear, natural answer for the user.
 
-Your task is to take the SQL result and answer the user's question clearly.
-Never mention SQL or database terms.
+Always base your answer strictly on the information inside the SQL result.  
+Do not mention SQL, queries, databases, or any technical process.
 
-If the SQL result is empty or not found, respond with:
-"No record found for the given details."
-
-If the model earlier asked for more details, repeat that message politely.
-
-If data is found, give a natural, direct response like:
-"Vel Geetha has been allotted a laptop and the delivery status is 'Delivered'."
+When responding:
+1) Be polite, helpful, and factual.
+2) Keep the answer short and clear (2–4 sentences).
+3) Use the student's name and details exactly as found in the result.
+4) If the SQL result is empty or no matching record is found, say: “No record found for the given details.”
+5) If some fields are missing, respond naturally with: “I don’t have that information available right now.”
+6) Your answer should sound like you are assisting a student or parent.
 
 Question: {question}
 SQL Query: {query}
 SQL Result: {result}
-Answer:"""
+Answer:
+"""
 )
 
 format_answer = answer_prompt | llm | StrOutputParser()
